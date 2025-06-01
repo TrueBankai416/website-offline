@@ -9,6 +9,7 @@ import threading
 import time
 import json
 from browser_cloner import BrowserWebsiteCloner
+from selenium.webdriver.common.by import By
 
 
 class BrowserClonerGUI:
@@ -42,6 +43,8 @@ class BrowserClonerGUI:
         
         # Browser cloner instance
         self.cloner = None
+        self.should_stop = False
+        self.cloning_thread = None
         
         self.setup_ui()
         self.detect_browsers()
@@ -168,7 +171,12 @@ class BrowserClonerGUI:
         self.clone_button = ttk.Button(control_frame, text="Clone Website with Browser", command=self.start_cloning)
         self.clone_button.grid(row=0, column=0, padx=(0, 10))
         
-        ttk.Button(control_frame, text="Detect Browsers", command=self.detect_browsers).grid(row=0, column=1)
+        self.stop_button = ttk.Button(control_frame, text="Stop Cloning", command=self.stop_cloning, state='disabled')
+        self.stop_button.grid(row=0, column=1, padx=(0, 10))
+        
+        ttk.Button(control_frame, text="Detect Browsers", command=self.detect_browsers).grid(row=0, column=2, padx=(0, 10))
+        
+        ttk.Button(control_frame, text="Debug Login Fields", command=self.debug_login_fields).grid(row=0, column=3)
         
         # Progress bar
         self.progress_bar = ttk.Progressbar(main_frame, mode='indeterminate')
@@ -210,6 +218,67 @@ class BrowserClonerGUI:
         except Exception as e:
             self.log_message(f"Error detecting browsers: {str(e)}")
             
+    def debug_login_fields(self):
+        """Debug login fields on a website to help find correct field names."""
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a URL first")
+            return
+            
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            
+        login_url = self.login_url_var.get().strip() or url
+        
+        def debug_fields():
+            try:
+                self.log_message(f"Inspecting login fields at: {login_url}")
+                
+                # Create a temporary cloner for debugging
+                debug_cloner = BrowserWebsiteCloner(browser=self.browser_var.get(), headless=False)
+                
+                if not debug_cloner.setup_browser():
+                    self.log_message("Failed to initialize browser for debugging")
+                    return
+                    
+                debug_cloner.driver.get(login_url)
+                time.sleep(3)
+                
+                # Find all input fields
+                input_fields = debug_cloner.driver.find_elements(By.TAG_NAME, "input")
+                
+                self.log_message(f"Found {len(input_fields)} input fields:")
+                
+                for i, field in enumerate(input_fields):
+                    try:
+                        field_type = field.get_attribute("type") or "text"
+                        field_name = field.get_attribute("name") or ""
+                        field_id = field.get_attribute("id") or ""
+                        field_class = field.get_attribute("class") or ""
+                        field_placeholder = field.get_attribute("placeholder") or ""
+                        
+                        self.log_message(f"  Field {i+1}: type='{field_type}', name='{field_name}', id='{field_id}', class='{field_class}', placeholder='{field_placeholder}'")
+                        
+                    except Exception as e:
+                        self.log_message(f"  Field {i+1}: Error reading attributes - {str(e)}")
+                
+                self.log_message("Login field inspection completed. Look for username/email and password fields above.")
+                self.log_message("Use the 'name' or 'id' values in the Username Field and Password Field settings.")
+                
+                # Keep browser open for 10 seconds for manual inspection
+                self.log_message("Browser will stay open for 10 seconds for manual inspection...")
+                time.sleep(10)
+                
+                debug_cloner.cleanup_browser()
+                
+            except Exception as e:
+                self.log_message(f"Debug failed: {str(e)}")
+                
+        # Run in separate thread
+        thread = threading.Thread(target=debug_fields)
+        thread.daemon = True
+        thread.start()
+            
     def log_message(self, message):
         self.log_text.insert(tk.END, f"{time.strftime('%H:%M:%S')} - {message}\n")
         self.log_text.see(tk.END)
@@ -219,6 +288,26 @@ class BrowserClonerGUI:
         directory = filedialog.askdirectory()
         if directory:
             self.output_dir_var.set(directory)
+            
+    def stop_cloning(self):
+        """Stop the cloning process."""
+        if self.is_cloning:
+            self.should_stop = True
+            self.log_message("Stop requested by user...")
+            
+            # Clean up browser if active
+            if self.cloner and self.cloner.driver:
+                try:
+                    self.cloner.cleanup_browser()
+                    self.log_message("Browser cleaned up")
+                except Exception as e:
+                    self.log_message(f"Error cleaning up browser: {str(e)}")
+                    
+            self.progress_var.set("Cloning stopped by user")
+            self.is_cloning = False
+            self.clone_button.config(state='normal')
+            self.stop_button.config(state='disabled')
+            self.progress_bar.stop()
             
     def start_cloning(self):
         if self.is_cloning:
@@ -239,14 +328,16 @@ class BrowserClonerGUI:
             return
             
         self.is_cloning = True
+        self.should_stop = False
         self.clone_button.config(state='disabled')
+        self.stop_button.config(state='normal')
         self.progress_bar.start()
         self.log_text.delete(1.0, tk.END)
         
         # Start cloning in a separate thread
-        thread = threading.Thread(target=self.clone_website, args=(url, output_dir))
-        thread.daemon = True
-        thread.start()
+        self.cloning_thread = threading.Thread(target=self.clone_website, args=(url, output_dir))
+        self.cloning_thread.daemon = True
+        self.cloning_thread.start()
         
     def clone_website(self, url, output_dir):
         try:
@@ -282,6 +373,10 @@ class BrowserClonerGUI:
                 )
                 self.log_message(f"Authentication configured for user: {username}")
                 
+                # Override perform_login to handle failures with user dialog
+                original_perform_login = self.cloner.perform_login
+                self.cloner.perform_login = self.enhanced_perform_login
+                
             # Set custom cookies if provided
             cookies_text = self.cookies_var.get().strip()
             if cookies_text:
@@ -302,8 +397,8 @@ class BrowserClonerGUI:
                 except Exception as e:
                     self.log_message(f"Failed to parse headers: {e}")
                     
-            # Start cloning
-            success = self.cloner.clone_website(url, output_dir)
+            # Start cloning with stop checks
+            success = self.clone_website_with_stop_check(url, output_dir)
             
             if success:
                 self.progress_var.set("Enhanced cloning completed successfully!")
@@ -323,7 +418,42 @@ class BrowserClonerGUI:
         finally:
             self.is_cloning = False
             self.clone_button.config(state='normal')
+            self.stop_button.config(state='disabled')
             self.progress_bar.stop()
+            
+    def enhanced_perform_login(self):
+        """Enhanced login method with user dialog on failure."""
+        try:
+            return self.cloner.perform_login_original()
+        except Exception as e:
+            self.log_message(f"Login failed: {str(e)}")
+            
+            # Ask user whether to continue or abort
+            response = messagebox.askyesno(
+                "Login Failed", 
+                f"Login failed: {str(e)}\n\nWould you like to continue without authentication?",
+                icon='warning'
+            )
+            
+            if not response:
+                self.log_message("User chose to abort after login failure")
+                self.should_stop = True
+                return False
+            else:
+                self.log_message("User chose to continue without authentication")
+                return True
+                
+    def clone_website_with_stop_check(self, url, output_dir):
+        """Clone website with periodic stop checks."""
+        if self.should_stop:
+            return False
+            
+        # Store original perform_login if we haven't already
+        if not hasattr(self.cloner, 'perform_login_original'):
+            self.cloner.perform_login_original = self.cloner.perform_login
+            
+        # Call original clone_website method
+        return self.cloner.clone_website(url, output_dir)
 
 
 def main():

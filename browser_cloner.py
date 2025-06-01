@@ -288,6 +288,57 @@ class BrowserWebsiteCloner:
         """Set custom headers for authentication."""
         self.auth_headers = headers_dict
         
+    def find_login_field(self, field_type, field_name):
+        """Try to find login field using multiple strategies."""
+        strategies = []
+        
+        # Strategy 1: Use provided field name
+        if field_name:
+            strategies.extend([
+                (By.NAME, field_name),
+                (By.ID, field_name),
+                (By.CSS_SELECTOR, f'[name="{field_name}"]'),
+                (By.CSS_SELECTOR, f'[id="{field_name}"]')
+            ])
+        
+        # Strategy 2: Common field names based on type
+        if field_type == "username":
+            common_names = ["username", "user", "email", "login", "userid", "user_name", "loginname"]
+        else:  # password
+            common_names = ["password", "pass", "passwd", "pwd", "user_password"]
+            
+        for name in common_names:
+            strategies.extend([
+                (By.NAME, name),
+                (By.ID, name),
+                (By.CSS_SELECTOR, f'[name="{name}"]'),
+                (By.CSS_SELECTOR, f'[id="{name}"]')
+            ])
+            
+        # Strategy 3: Input type selectors
+        if field_type == "username":
+            strategies.extend([
+                (By.CSS_SELECTOR, 'input[type="text"]'),
+                (By.CSS_SELECTOR, 'input[type="email"]'),
+                (By.CSS_SELECTOR, 'input:not([type="password"]):not([type="hidden"]):not([type="submit"])'),
+            ])
+        else:  # password
+            strategies.append((By.CSS_SELECTOR, 'input[type="password"]'))
+            
+        # Try each strategy
+        for by, value in strategies:
+            try:
+                elements = self.driver.find_elements(by, value)
+                if elements:
+                    # For multiple elements, try to pick the most likely one
+                    element = elements[0]
+                    self.log_message(f"Found {field_type} field using {by}='{value}'")
+                    return element
+            except Exception:
+                continue
+                
+        return None
+    
     def perform_login(self):
         """Perform login if authentication is configured."""
         if not self.auth_username or not self.auth_password:
@@ -300,19 +351,28 @@ class BrowserWebsiteCloner:
             self.driver.get(login_url)
             time.sleep(2)
             
-            # Find and fill username field
-            username_field = self.driver.find_element(By.NAME, self.auth_username_field)
+            # Find username field using enhanced detection
+            username_field = self.find_login_field("username", self.auth_username_field)
+            if not username_field:
+                raise Exception(f"Could not find username field. Tried field name: '{self.auth_username_field}' and common alternatives.")
+                
             username_field.clear()
             username_field.send_keys(self.auth_username)
+            self.log_message(f"Filled username field")
             
-            # Find and fill password field
-            password_field = self.driver.find_element(By.NAME, self.auth_password_field)
+            # Find password field using enhanced detection
+            password_field = self.find_login_field("password", self.auth_password_field)
+            if not password_field:
+                raise Exception(f"Could not find password field. Tried field name: '{self.auth_password_field}' and common alternatives.")
+                
             password_field.clear()
             password_field.send_keys(self.auth_password)
+            self.log_message(f"Filled password field")
             
             # Submit form
             submit_button = self.driver.find_element(By.CSS_SELECTOR, self.auth_submit_selector)
             submit_button.click()
+            self.log_message(f"Clicked submit button")
             
             # Wait for page to load after login
             time.sleep(3)
