@@ -490,8 +490,57 @@ class BrowserWebsiteCloner:
                 if (not path or path.endswith('/') or path.endswith('.html') or 
                     path.endswith('.htm') or '.' not in os.path.basename(path)):
                     links.add(normalized_url)
+        
+        # Also extract links from JavaScript-generated content using browser
+        if self.driver:
+            try:
+                # Execute JavaScript to find all link elements
+                js_links = self.driver.execute_script("""
+                    var links = [];
+                    var elements = document.querySelectorAll('a[href], [data-href], [ng-click], [onclick]');
+                    for (var i = 0; i < elements.length; i++) {
+                        var href = elements[i].href || elements[i].getAttribute('data-href');
+                        if (href && href !== window.location.href) {
+                            links.push(href);
+                        }
+                    }
+                    return links;
+                """)
+                
+                for href in js_links:
+                    if href and not href.startswith(('mailto:', 'tel:', 'javascript:', '#')):
+                        absolute_url = urllib.parse.urljoin(current_url, href)
+                        normalized_url = self.normalize_url(absolute_url)
+                        
+                        if self.is_same_domain(normalized_url):
+                            parsed = urllib.parse.urlparse(normalized_url)
+                            path = parsed.path.lower()
+                            if (not path or path.endswith('/') or path.endswith('.html') or 
+                                path.endswith('.htm') or '.' not in os.path.basename(path)):
+                                links.add(normalized_url)
+                                
+            except Exception as e:
+                self.log_message(f"Failed to extract JavaScript links: {str(e)}")
+        
+        self.log_message(f"Found {len(links)} internal links on {current_url}")
+        if links:
+            self.log_message(f"Links found: {list(links)[:5]}...")  # Show first 5 for debugging
                     
         return links
+        
+    def get_browser_cookies(self):
+        """Extract cookies from browser session for use in requests."""
+        if not self.driver:
+            return {}
+            
+        cookies = {}
+        try:
+            for cookie in self.driver.get_cookies():
+                cookies[cookie['name']] = cookie['value']
+        except Exception as e:
+            self.log_message(f"Failed to extract cookies: {str(e)}")
+            
+        return cookies
         
     def download_asset(self, url, assets_dir, filename):
         """Download and save an asset file."""
@@ -504,13 +553,17 @@ class BrowserWebsiteCloner:
             
             self.log_message(f"Downloading asset: {url}")
             
-            # Use requests for asset downloads (faster than browser)
+            # Use requests for asset downloads with browser cookies for authentication
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': self.base_url
             }
             headers.update(self.auth_headers)
             
-            response = requests.get(url, headers=headers, timeout=10)
+            # Get cookies from browser session
+            cookies = self.get_browser_cookies()
+            
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
             response.raise_for_status()
             
             # Save the file
@@ -521,6 +574,12 @@ class BrowserWebsiteCloner:
             self.log_message(f"Saved asset: {filename}")
             return True
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                self.log_message(f"Asset not found (404): {url} - skipping")
+            else:
+                self.log_message(f"HTTP error downloading asset {url}: {str(e)}")
+            return False
         except Exception as e:
             self.log_message(f"Failed to download asset {url}: {str(e)}")
             return False
