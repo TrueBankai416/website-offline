@@ -373,8 +373,8 @@ class BrowserClonerGUI:
                 )
                 self.log_message(f"Authentication configured for user: {username}")
                 
-                # Override perform_login to handle failures with user dialog
-                original_perform_login = self.cloner.perform_login
+                # Store original perform_login method before overriding
+                self.cloner.perform_login_original = self.cloner.perform_login
                 self.cloner.perform_login = self.enhanced_perform_login
                 
             # Set custom cookies if provided
@@ -424,7 +424,45 @@ class BrowserClonerGUI:
     def enhanced_perform_login(self):
         """Enhanced login method with user dialog on failure."""
         try:
-            return self.cloner.perform_login_original()
+            # Call the original perform_login method directly
+            if not self.cloner.auth_username or not self.cloner.auth_password:
+                return True
+                
+            login_url = self.cloner.auth_login_url or self.cloner.base_url
+            self.log_message(f"Performing login at: {login_url}")
+            
+            self.cloner.driver.get(login_url)
+            time.sleep(2)
+            
+            # Find username field using enhanced detection
+            username_field = self.cloner.find_login_field("username", self.cloner.auth_username_field)
+            if not username_field:
+                raise Exception(f"Could not find username field. Tried field name: '{self.cloner.auth_username_field}' and common alternatives.")
+                
+            username_field.clear()
+            username_field.send_keys(self.cloner.auth_username)
+            self.log_message(f"Filled username field")
+            
+            # Find password field using enhanced detection
+            password_field = self.cloner.find_login_field("password", self.cloner.auth_password_field)
+            if not password_field:
+                raise Exception(f"Could not find password field. Tried field name: '{self.cloner.auth_password_field}' and common alternatives.")
+                
+            password_field.clear()
+            password_field.send_keys(self.cloner.auth_password)
+            self.log_message(f"Filled password field")
+            
+            # Submit form
+            submit_button = self.cloner.driver.find_element(By.CSS_SELECTOR, self.cloner.auth_submit_selector)
+            submit_button.click()
+            self.log_message(f"Clicked submit button")
+            
+            # Wait for page to load after login
+            time.sleep(3)
+            
+            self.log_message("Login completed")
+            return True
+            
         except Exception as e:
             self.log_message(f"Login failed: {str(e)}")
             
@@ -447,10 +485,6 @@ class BrowserClonerGUI:
         """Clone website with periodic stop checks."""
         if self.should_stop:
             return False
-            
-        # Store original perform_login if we haven't already
-        if not hasattr(self.cloner, 'perform_login_original'):
-            self.cloner.perform_login_original = self.cloner.perform_login
             
         # Call original clone_website method
         return self.cloner.clone_website(url, output_dir)
