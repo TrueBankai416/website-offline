@@ -8,6 +8,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import time
 import json
+import os
 from browser_cloner import BrowserWebsiteCloner
 from selenium.webdriver.common.by import By
 
@@ -48,6 +49,7 @@ class BrowserClonerGUI:
         
         self.setup_ui()
         self.detect_browsers()
+        self.load_settings()
         
     def setup_ui(self):
         # Main frame with scrollbar
@@ -295,6 +297,11 @@ class BrowserClonerGUI:
             self.should_stop = True
             self.log_message("Stop requested by user...")
             
+            # Set stop flag on cloner as well
+            if self.cloner:
+                self.cloner.should_stop = True
+                self.log_message("Stop signal sent to cloner")
+            
             # Clean up browser if active
             if self.cloner and self.cloner.driver:
                 try:
@@ -373,8 +380,7 @@ class BrowserClonerGUI:
                 )
                 self.log_message(f"Authentication configured for user: {username}")
                 
-                # Store original perform_login method before overriding
-                self.cloner.perform_login_original = self.cloner.perform_login
+                # Override the perform_login method completely
                 self.cloner.perform_login = self.enhanced_perform_login
                 
             # Set custom cookies if provided
@@ -527,6 +533,7 @@ class BrowserClonerGUI:
             if not response:
                 self.log_message("User chose to abort after login failure")
                 self.should_stop = True
+                self.cloner.should_stop = True
                 return False
             else:
                 self.log_message("User chose to continue without authentication")
@@ -539,11 +546,71 @@ class BrowserClonerGUI:
             
         # Call original clone_website method
         return self.cloner.clone_website(url, output_dir)
+        
+    def save_settings(self):
+        """Save current settings to file."""
+        try:
+            settings = {
+                'url': self.url_var.get(),
+                'output_dir': self.output_dir_var.get(),
+                'max_depth': self.max_depth_var.get(),
+                'max_pages': self.max_pages_var.get(),
+                'delay': self.delay_var.get(),
+                'wait_time': self.wait_time_var.get(),
+                'headless': self.headless_var.get(),
+                'browser': self.browser_var.get(),
+                'username': self.username_var.get(),
+                'login_url': self.login_url_var.get(),
+                'username_field': self.username_field_var.get(),
+                'password_field': self.password_field_var.get(),
+                'cookies': self.cookies_var.get(),
+                'headers': self.headers_var.get()
+            }
+            
+            with open('browser_cloner_settings.json', 'w') as f:
+                json.dump(settings, f, indent=2)
+                
+        except Exception as e:
+            self.log_message(f"Failed to save settings: {str(e)}")
+            
+    def load_settings(self):
+        """Load settings from file."""
+        try:
+            if os.path.exists('browser_cloner_settings.json'):
+                with open('browser_cloner_settings.json', 'r') as f:
+                    settings = json.load(f)
+                    
+                # Apply settings to GUI
+                self.url_var.set(settings.get('url', ''))
+                self.output_dir_var.set(settings.get('output_dir', './cloned_website'))
+                self.max_depth_var.set(settings.get('max_depth', 3))
+                self.max_pages_var.set(settings.get('max_pages', 100))
+                self.delay_var.set(settings.get('delay', 1.0))
+                self.wait_time_var.set(settings.get('wait_time', 5.0))
+                self.headless_var.set(settings.get('headless', True))
+                self.browser_var.set(settings.get('browser', 'auto'))
+                self.username_var.set(settings.get('username', ''))
+                self.login_url_var.set(settings.get('login_url', ''))
+                self.username_field_var.set(settings.get('username_field', 'username'))
+                self.password_field_var.set(settings.get('password_field', 'password'))
+                self.cookies_var.set(settings.get('cookies', ''))
+                self.headers_var.set(settings.get('headers', ''))
+                
+                self.log_message("Settings loaded from previous session")
+                
+        except Exception as e:
+            self.log_message(f"Failed to load settings: {str(e)}")
+            
+    def on_closing(self):
+        """Handle application closing."""
+        self.save_settings()
+        self.root.destroy()
 
 
 def main():
     root = tk.Tk()
     app = BrowserClonerGUI(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
 
 

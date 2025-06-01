@@ -48,6 +48,7 @@ class BrowserWebsiteCloner:
         self.base_domain = None
         self.base_url = None
         self.driver = None
+        self.should_stop = False
         
         # Authentication settings
         self.auth_username = None
@@ -680,19 +681,29 @@ class BrowserWebsiteCloner:
                 self.log_message(f"Crawling up to {self.max_pages} pages with max depth {self.max_depth}")
                 
                 while self.url_queue and pages_downloaded < self.max_pages:
-                    current_url, depth = self.url_queue.popleft()
+                    # Check if we should stop
+                    if self.should_stop:
+                        self.log_message("Crawling stopped by user request")
+                        break
                     
+                    current_url, depth = self.url_queue.popleft()
+                
                     # Skip if already downloaded
                     if current_url in self.downloaded_pages:
                         continue
-                        
+                    
                     # Skip if depth exceeded
                     if depth > self.max_depth:
                         continue
-                        
+                    
+                    # Check again before processing page
+                    if self.should_stop:
+                        self.log_message("Crawling stopped by user request")
+                        break
+                    
                     try:
                         self.log_message(f"Downloading page {pages_downloaded + 1}/{self.max_pages}: {current_url} (depth: {depth})")
-                        
+                    
                         # Get the page with JavaScript execution
                         html = self.get_page_with_js(current_url)
                         if not html:
