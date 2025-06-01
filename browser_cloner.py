@@ -13,19 +13,28 @@ import argparse
 import sys
 
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.safari.service import Service as SafariService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from bs4 import BeautifulSoup
 import requests
+import shutil
+import platform
 
 
 class BrowserWebsiteCloner:
-    def __init__(self, max_depth=3, max_pages=100, delay=1.0, headless=True, wait_time=5.0):
+    def __init__(self, max_depth=3, max_pages=100, delay=1.0, headless=True, wait_time=5.0, browser="auto"):
         self.downloaded_files = set()
         self.downloaded_pages = set()
         self.url_queue = deque()
@@ -34,6 +43,8 @@ class BrowserWebsiteCloner:
         self.delay = delay
         self.headless = headless
         self.wait_time = wait_time
+        self.browser = browser
+        self.detected_browser = None
         self.base_domain = None
         self.base_url = None
         self.driver = None
@@ -51,10 +62,116 @@ class BrowserWebsiteCloner:
     def log_message(self, message):
         print(f"[INFO] {message}")
         
+    def detect_available_browsers(self):
+        """Detect which browsers are available on the system."""
+        available_browsers = []
+        
+        # Check for Chrome
+        chrome_paths = [
+            "google-chrome",
+            "google-chrome-stable", 
+            "chrome",
+            "chromium",
+            "chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+        ]
+        
+        for path in chrome_paths:
+            if shutil.which(path) or os.path.exists(path):
+                available_browsers.append("chrome")
+                break
+                
+        # Check for Firefox
+        firefox_paths = [
+            "firefox",
+            "firefox-esr",
+            "/usr/bin/firefox",
+            "/usr/bin/firefox-esr", 
+            "/Applications/Firefox.app/Contents/MacOS/firefox",
+            "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+            "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"
+        ]
+        
+        for path in firefox_paths:
+            if shutil.which(path) or os.path.exists(path):
+                available_browsers.append("firefox")
+                break
+                
+        # Check for Edge (Windows/macOS)
+        edge_paths = [
+            "msedge",
+            "microsoft-edge",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+        ]
+        
+        for path in edge_paths:
+            if shutil.which(path) or os.path.exists(path):
+                available_browsers.append("edge")
+                break
+                
+        # Check for Safari (macOS only)
+        if platform.system() == "Darwin":
+            safari_path = "/Applications/Safari.app/Contents/MacOS/Safari"
+            if os.path.exists(safari_path):
+                available_browsers.append("safari")
+        
+        return available_browsers
+        
+    def select_best_browser(self):
+        """Select the best available browser."""
+        if self.browser != "auto":
+            return self.browser
+            
+        available = self.detect_available_browsers()
+        
+        if not available:
+            raise Exception("No supported browsers found. Please install Chrome, Firefox, Edge, or Safari.")
+            
+        # Priority order: Chrome > Firefox > Edge > Safari
+        priority = ["chrome", "firefox", "edge", "safari"]
+        
+        for browser in priority:
+            if browser in available:
+                return browser
+                
+        return available[0]  # Fallback to first available
+        
     def setup_browser(self):
         """Initialize the headless browser."""
         try:
-            chrome_options = Options()
+            # Select the best available browser
+            selected_browser = self.select_best_browser()
+            self.detected_browser = selected_browser
+            
+            self.log_message(f"Using browser: {selected_browser}")
+            
+            if selected_browser == "chrome":
+                return self._setup_chrome()
+            elif selected_browser == "firefox":
+                return self._setup_firefox()
+            elif selected_browser == "edge":
+                return self._setup_edge()
+            elif selected_browser == "safari":
+                return self._setup_safari()
+            else:
+                raise Exception(f"Unsupported browser: {selected_browser}")
+                
+        except Exception as e:
+            self.log_message(f"Failed to initialize browser: {str(e)}")
+            return False
+            
+    def _setup_chrome(self):
+        """Setup Chrome browser."""
+        try:
+            chrome_options = ChromeOptions()
             if self.headless:
                 chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
@@ -63,16 +180,84 @@ class BrowserWebsiteCloner:
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
             
-            # Install and setup Chrome driver
-            service = Service(ChromeDriverManager().install())
+            service = ChromeService(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(30)
             
-            self.log_message("Browser initialized successfully")
+            self.log_message("Chrome browser initialized successfully")
             return True
             
         except Exception as e:
-            self.log_message(f"Failed to initialize browser: {str(e)}")
+            self.log_message(f"Failed to initialize Chrome: {str(e)}")
+            return False
+            
+    def _setup_firefox(self):
+        """Setup Firefox browser."""
+        try:
+            firefox_options = FirefoxOptions()
+            if self.headless:
+                firefox_options.add_argument("--headless")
+            firefox_options.add_argument("--width=1920")
+            firefox_options.add_argument("--height=1080")
+            firefox_options.set_preference("general.useragent.override", 
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+            
+            service = FirefoxService(GeckoDriverManager().install())
+            self.driver = webdriver.Firefox(service=service, options=firefox_options)
+            self.driver.set_page_load_timeout(30)
+            
+            self.log_message("Firefox browser initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"Failed to initialize Firefox: {str(e)}")
+            return False
+            
+    def _setup_edge(self):
+        """Setup Edge browser."""
+        try:
+            edge_options = EdgeOptions()
+            if self.headless:
+                edge_options.add_argument("--headless")
+            edge_options.add_argument("--no-sandbox")
+            edge_options.add_argument("--disable-dev-shm-usage")
+            edge_options.add_argument("--disable-gpu")
+            edge_options.add_argument("--window-size=1920,1080")
+            edge_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59")
+            
+            service = EdgeService(EdgeChromiumDriverManager().install())
+            self.driver = webdriver.Edge(service=service, options=edge_options)
+            self.driver.set_page_load_timeout(30)
+            
+            self.log_message("Edge browser initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"Failed to initialize Edge: {str(e)}")
+            return False
+            
+    def _setup_safari(self):
+        """Setup Safari browser (macOS only)."""
+        try:
+            if platform.system() != "Darwin":
+                raise Exception("Safari is only available on macOS")
+                
+            # Safari doesn't support headless mode through Selenium
+            if self.headless:
+                self.log_message("Safari doesn't support headless mode, running in visible mode")
+                
+            service = SafariService()
+            self.driver = webdriver.Safari(service=service)
+            self.driver.set_page_load_timeout(30)
+            
+            # Set window size for Safari
+            self.driver.set_window_size(1920, 1080)
+            
+            self.log_message("Safari browser initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"Failed to initialize Safari: {str(e)}")
             return False
             
     def cleanup_browser(self):
@@ -520,6 +705,8 @@ def main():
                        help='Wait time for JavaScript execution (default: 5.0)')
     parser.add_argument('--no-headless', action='store_true',
                        help='Run browser in non-headless mode (visible)')
+    parser.add_argument('--browser', choices=['auto', 'chrome', 'firefox', 'edge', 'safari'], 
+                       default='auto', help='Browser to use (default: auto-detect)')
     
     # Authentication options
     auth_group = parser.add_argument_group('authentication')
@@ -556,7 +743,8 @@ def main():
         max_pages=args.pages, 
         delay=args.delay,
         headless=not args.no_headless,
-        wait_time=args.wait_time
+        wait_time=args.wait_time,
+        browser=args.browser
     )
     
     # Set up authentication if provided

@@ -6,8 +6,14 @@ The **Browser-Enhanced Website Cloner** (`browser_cloner.py`) uses a headless Ch
 
 ## 🚀 **Key Features**
 
+### **Multi-Browser Support**
+- ✅ **Auto-detection** of available browsers
+- ✅ **Chrome, Firefox, Edge, Safari** support
+- ✅ **Smart fallback** system - uses best available browser
+- ✅ **Manual browser selection** or automatic detection
+
 ### **JavaScript Execution**
-- ✅ **Full JavaScript execution** using headless Chrome
+- ✅ **Full JavaScript execution** using headless browsers
 - ✅ **Dynamic content capture** (AJAX, XHR, SPAs)
 - ✅ **Rendered DOM extraction** after all scripts run
 - ✅ **Configurable wait times** for content loading
@@ -52,6 +58,16 @@ Download and install from [chrome.google.com](https://chrome.google.com)
 
 ## 🎯 **Usage Examples**
 
+### **GUI Version (Recommended)**
+```bash
+python3 browser_cloner_gui.py
+```
+- **Complete graphical interface** with all options
+- **Browser auto-detection** dropdown
+- **Authentication forms** for username/password, cookies, headers
+- **Real-time progress** and logging
+- **All crawling options** in easy-to-use interface
+
 ### **Basic JavaScript-Heavy Site**
 ```bash
 python3 browser_cloner.py https://spa-example.com \
@@ -59,6 +75,22 @@ python3 browser_cloner.py https://spa-example.com \
   --depth 3 \
   --pages 50 \
   --wait-time 5.0
+```
+
+### **Auto-Detect Browser**
+```bash
+python3 browser_cloner.py https://site.com \
+  --browser auto \
+  --depth 3 \
+  --pages 100
+```
+
+### **Force Specific Browser**
+```bash
+python3 browser_cloner.py https://site.com \
+  --browser firefox \
+  --depth 3 \
+  --pages 100
 ```
 
 ### **Login-Protected Site**
