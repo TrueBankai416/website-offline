@@ -84,8 +84,14 @@ class BrowserClonerGUI:
         url_frame.grid(row=current_row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         current_row += 1
         
-        ttk.Entry(url_frame, textvariable=self.url_var, width=80).grid(row=0, column=0, sticky=(tk.W, tk.E))
-        url_frame.columnconfigure(0, weight=1)
+        ttk.Label(url_frame, text="Main URL:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Entry(url_frame, textvariable=self.url_var, width=70).grid(row=0, column=1, sticky=(tk.W, tk.E))
+        
+        ttk.Label(url_frame, text="Additional URLs (one per line):").grid(row=1, column=0, sticky=(tk.W, tk.N), padx=(0, 10), pady=(10, 0))
+        self.additional_urls_text = tk.Text(url_frame, height=4, width=70)
+        self.additional_urls_text.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        url_frame.columnconfigure(1, weight=1)
         
         # Output directory
         output_frame = ttk.LabelFrame(main_frame, text="Output Directory", padding="10")
